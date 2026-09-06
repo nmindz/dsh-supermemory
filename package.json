@@ -1,6 +1,6 @@
 {
   "name": "dsh-supermemory",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Persistent memory across DeepSeek Harness (DSH) sessions using Supermemory. A native port of the Claude Code supermemory plugin.",
   "keywords": [
     "dsh",
