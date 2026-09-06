@@ -16,13 +16,82 @@ Everything recalled from supermemory is marked `◪`, and the model is instructe
 
 ## Install
 
+Pick a profile name — `tui`, `web`, or whatever you boot with `dsh --profile <name>`. The examples use `tui`.
+
+### From npm
+
 ```sh
-dsh plugin --profile <name> add dsh-supermemory
+dsh plugin --profile tui add dsh-supermemory
 ```
 
-Restart the profile. On the first session with no stored key, the browser login opens; the key lands in `~/.supermemory-claude/credentials.json`, the same file the Claude Code plugin uses. Alternatively set `SUPERMEMORY_CC_API_KEY`.
+### From a release tarball
+
+```sh
+curl -fsSLO https://github.com/nmindz/dsh-supermemory/releases/latest/download/dsh-supermemory.tgz
+dsh plugin --profile tui add ./dsh-supermemory.tgz
+```
+
+### From GitHub
+
+A git install builds the package on your machine, and pnpm blocks that until you allow it by exact commit. Run the command once to make pnpm print the key, paste the key into the profile's `pnpm-workspace.yaml`, then run it again:
+
+```sh
+dsh plugin --profile tui add github:nmindz/dsh-supermemory
+# pnpm refuses and prints an allowBuilds key — append it:
+cat >> ~/.dsh/profiles/tui/pnpm-workspace.yaml <<'YAML'
+allowBuilds:
+  dsh-supermemory@git+ssh://git@github.com/nmindz/dsh-supermemory.git#<the-sha-pnpm-printed>: true
+YAML
+dsh plugin --profile tui add github:nmindz/dsh-supermemory
+```
+
+That key is permission to run this package's build script on your machine at install time, outside any sandbox. Pin the commit SHA pnpm printed rather than a branch.
+
+### From a clone
+
+```sh
+git clone https://github.com/nmindz/dsh-supermemory.git
+cd dsh-supermemory
+pnpm install && pnpm run build
+dsh plugin --profile tui add "$PWD"
+```
+
+### After installing
+
+Restart the profile:
+
+```sh
+dsh --profile tui
+```
+
+On the first session with no stored key the browser login opens, and the key lands in `~/.supermemory-claude/credentials.json` — the same file the Claude Code plugin uses, so one login covers both. To skip the browser entirely:
+
+```sh
+export SUPERMEMORY_CC_API_KEY=sm_your_key_here
+```
+
+Confirm the plugin composed into your profile:
+
+```sh
+dsh --profile tui --dump-config | grep -A2 'dsh-supermemory'
+# == dsh-supermemory
+# - id: supermemory
+#   name: dsh-supermemory
+```
+
+Then, inside a session, check the live connection:
+
+```
+/supermemory-status
+```
 
 Nothing else is required — the bundle contributes its own patch row.
+
+### Uninstall
+
+```sh
+dsh plugin --profile tui remove dsh-supermemory
+```
 
 ## Configuration
 
@@ -127,6 +196,30 @@ pnpm run check      # typecheck + tests + build
 ```
 
 Requires Node `^22.19.0 || >=24.0.0`.
+
+## Releasing
+
+Publishing runs from GitHub Actions through npm **trusted publishing (OIDC)** — no `NPM_TOKEN` secret exists, and every release carries provenance.
+
+One-time setup on npm: open <https://www.npmjs.com/package/dsh-supermemory/access>, add a trusted publisher, choose GitHub Actions, and enter organization `nmindz`, repository `dsh-supermemory`, workflow `.github/workflows/release.yml`, environment `npm`.
+
+Then each release is a version bump and a tag:
+
+```sh
+npm version 0.1.1 --no-git-tag-version   # edits package.json only
+git commit -am 'Release v0.1.1'
+git tag v0.1.1
+git push origin master --tags
+```
+
+The workflow refuses to publish when the tag and `package.json` version disagree, and runs `pnpm run check` before it publishes.
+
+To publish by hand instead (requires `npm login` or a configured token):
+
+```sh
+pnpm run check
+npm publish --access public
+```
 
 ## License
 

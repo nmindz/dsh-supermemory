@@ -1,6 +1,6 @@
 {
   "name": "dsh-supermemory",
-  "version": "0.1.6",
+  "version": "0.1.0",
   "description": "Persistent memory across DeepSeek Harness (DSH) sessions using Supermemory. A native port of the Claude Code supermemory plugin.",
   "keywords": [
     "dsh",
@@ -33,6 +33,10 @@
     "LICENSE",
     "NOTICE"
   ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
@@ -110,7 +114,8 @@
     "prepare": "tsdown",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types test/*.test.ts",
-    "check": "npm run typecheck && npm test && npm run build"
+    "check": "npm run typecheck && npm test && npm run build",
+    "prepublishOnly": "npm run check"
   },
   "license": "MIT",
   "repository": {

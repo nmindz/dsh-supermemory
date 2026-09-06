@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish, e.g. v0.1.0'
+        required: true
+
+# OIDC trusted publishing: npm mints a short-lived credential from this
+# workflow's identity, so no NPM_TOKEN secret exists to leak or rotate.
+# Configure it once at https://www.npmjs.com/package/dsh-supermemory/access
+# -> Trusted publisher -> GitHub Actions, repository nmindz/dsh-supermemory,
+# workflow .github/workflows/release.yml. Provenance is attached automatically.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          cache: pnpm
+
+      # Trusted publishing requires an npm CLI that speaks OIDC.
+      - name: Pin an OIDC-capable npm
+        run: npm install -g npm@latest
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify the tag matches the manifest version
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          manifest="v$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$manifest" ]; then
+            echo "tag $tag does not match package.json version $manifest"
+            exit 1
+          fi
+
+      - run: pnpm run check
+
+      - name: Publish to npm with provenance
+        run: npm publish --access public --provenance
