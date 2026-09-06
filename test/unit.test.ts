@@ -406,6 +406,36 @@ describe('status command helpers', () => {
     assert.equal(status.maskKey('sm_1234567890abcdef'), 'sm_123…cdef')
     assert.equal(status.maskKey('short'), 'sh…')
   })
+
+  test('the summary survives a one-line toast render', () => {
+    const line = status.summaryLine([
+      'auth ok (credentials.json)',
+      'api 200',
+      'mcp 9 tools',
+      'repo_dsh_supermemory__f5453047deed1c64',
+    ])
+    // dsh-tui strips ANSI, collapses whitespace, then truncates at TOAST_CELLS.
+    const flattened = line.replace(/\u001b\[[0-9;]*m/g, '').replace(/\s+/g, ' ').trim()
+    assert.equal(flattened, line, 'the summary must survive flattening unchanged')
+    assert.ok(
+      flattened.length <= status.TOAST_CELLS,
+      `summary is ${flattened.length} cells, over the ${status.TOAST_CELLS}-cell budget`,
+    )
+    assert.match(line, /^◪ supermemory · auth ok/)
+  })
+
+  test('drops empty summary fields instead of leaving dangling separators', () => {
+    assert.equal(status.summaryLine(['a', '', 'b']), '◪ supermemory · a · b')
+  })
+
+  test('the unauthenticated summary also fits the budget', () => {
+    const line = status.summaryLine([
+      'NOT authenticated',
+      'set SUPERMEMORY_CC_API_KEY or start a new session to log in',
+      'dsh-supermemory',
+    ])
+    assert.ok(line.length <= status.TOAST_CELLS, `${line.length} cells`)
+  })
 })
 
 describe('context gatherer skill', () => {

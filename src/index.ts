@@ -30,7 +30,7 @@ export * from './transcript.ts'
 export { formatContext } from './session-start.ts'
 export { formatRecall, hashText, promptFrom, resultText, shouldSkip } from './recall.ts'
 export { readOnlyToolOf } from './approve.ts'
-export { maskKey } from './status.ts'
+export { maskKey, summaryLine, TOAST_CELLS } from './status.ts'
 export { resolveSkillDir, splitFrontmatter } from './context-gatherer.ts'
 
 export const name = 'supermemory'
