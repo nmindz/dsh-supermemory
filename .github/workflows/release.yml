@@ -1,13 +1,16 @@
 name: Release
 
+# Runs only after CI succeeded on master, and reuses the build CI already
+# produced — a release therefore costs zero extra builds. semantic-release
+# decides from the Conventional Commits since the last tag whether there is
+# anything to release at all, so an ordinary chore/ci/docs push exits in
+# seconds without staging anything.
 on:
-  push:
-    tags: ['v*']
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to publish, e.g. v0.1.0'
-        required: true
 
 # OIDC trusted publishing: npm mints a short-lived credential from this
 # workflow's identity, so no NPM_TOKEN secret exists to leak or rotate.
@@ -22,17 +25,31 @@ on:
 # with a 2FA code. CI therefore never holds a credential that can publish on
 # its own, and a compromised workflow run cannot ship a version by itself.
 permissions:
-  contents: read
-  id-token: write
+  contents: write # semantic-release pushes the changelog commit and the tag
+  issues: write # release comments on the issues a release closes
+  pull-requests: write
+  id-token: write # OIDC for npm trusted publishing
 
 jobs:
-  publish:
+  release:
+    name: Stage release
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment: production
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          # Check out the exact commit CI validated, with full history so
+          # semantic-release can read every commit since the last tag.
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      # Checking out a SHA leaves a detached HEAD, and semantic-release refuses
+      # to release from one ("triggered on the branch undefined"). Put a real
+      # master branch on the exact commit CI validated.
+      - name: Attach the validated commit to master
+        run: git checkout -B master ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: pnpm/action-setup@v4
         with:
@@ -44,29 +61,40 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: pnpm
 
-      # Trusted publishing requires an npm CLI that speaks OIDC.
+      # Trusted publishing and `npm stage` both need a recent npm.
       - name: Pin an OIDC-capable npm
         run: npm install -g npm@latest
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Verify the tag matches the manifest version
-        run: |
-          tag="${{ inputs.tag || github.ref_name }}"
-          manifest="v$(node -p "require('./package.json').version")"
-          if [ "$tag" != "$manifest" ]; then
-            echo "tag $tag does not match package.json version $manifest"
-            exit 1
-          fi
+      # The artifact CI built for this exact commit. lib/ carries no version
+      # string, so reusing it across the version bump is sound.
+      - name: Reuse the build from CI
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: lib
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - run: pnpm run check
+      # Only a manual dispatch has no upstream run to borrow from.
+      - name: Build (manual dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        run: pnpm run build
 
-      - name: Stage the release on npm with provenance
-        run: npm stage publish --access public --provenance
+      - name: Verify the build is present
+        run: test -f lib/index.mjs && test -f lib/mcp-proxy.mjs && test -f lib/statusline.mjs
+
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm exec semantic-release
 
       - name: Report what is waiting for approval
+        if: success()
         run: |
-          echo "Staged. Approve it to make the version live:"
+          echo "If a version was staged, approve it to make it live:"
           npm stage list dsh-supermemory || true
           echo
           echo "  npm stage view <stage-id>      # inspect first"

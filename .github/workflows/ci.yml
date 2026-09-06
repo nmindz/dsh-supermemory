@@ -6,8 +6,71 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Superseded runs on the same ref are pointless once a newer commit exists.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The package's `prepare` script builds it, which exists so a git install is
+  # usable. In CI the build is a job of its own, so installs skip all scripts
+  # rather than building the package on the way in.
+  PNPM_INSTALL: pnpm install --frozen-lockfile --ignore-scripts
+
 jobs:
-  check:
+  build:
+    name: Build and package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - run: ${{ env.PNPM_INSTALL }}
+
+      - run: pnpm run typecheck
+
+      - run: pnpm run build
+
+      - run: pnpm pack
+
+      # lib/ is only part of the payload: the plugin reads the skill body and
+      # both auth templates from disk at runtime, and they live outside lib/.
+      # A bad `files` list would otherwise surface only at install time.
+      - name: Verify tarball contents
+        run: |
+          tar tzf dsh-supermemory-*.tgz | sort > /tmp/contents.txt
+          cat /tmp/contents.txt
+          for required in \
+            package/lib/index.mjs \
+            package/lib/mcp-proxy.mjs \
+            package/lib/statusline.mjs \
+            package/cordis.patch.yml \
+            package/skills/supermemory-context-gatherer/SKILL.md \
+            package/templates/auth-success.html \
+            package/templates/auth-error.html
+          do
+            grep -qx "$required" /tmp/contents.txt || { echo "missing from tarball: $required"; exit 1; }
+          done
+
+      # The release workflow downloads this instead of building again, so a
+      # release costs one build in total.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: lib
+          retention-days: 7
+          if-no-files-found: error
+
+  test:
+    name: Test on Node ${{ matrix.node }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -25,28 +88,31 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
+      - run: ${{ env.PNPM_INSTALL }}
 
-      - run: pnpm run typecheck
-
+      # Tests run against src/ through type stripping, so they need no build.
       - run: pnpm test
 
-      - run: pnpm run build
+  commits:
+    name: Lint commit messages
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
-      # The published tarball is lib/ plus the runtime assets the plugin reads
-      # at runtime; a missing skill or template only shows up here.
-      - name: Verify package contents
-        run: |
-          pnpm pack
-          tar tzf dsh-supermemory-*.tgz | sort | tee /tmp/contents.txt
-          for required in \
-            package/lib/index.mjs \
-            package/lib/mcp-proxy.mjs \
-            package/lib/statusline.mjs \
-            package/cordis.patch.yml \
-            package/skills/supermemory-context-gatherer/SKILL.md \
-            package/templates/auth-success.html \
-            package/templates/auth-error.html
-          do
-            grep -qx "$required" /tmp/contents.txt || { echo "missing from tarball: $required"; exit 1; }
-          done
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - run: ${{ env.PNPM_INSTALL }}
+
+      # semantic-release derives the next version from these messages, so a
+      # malformed one silently costs a release.
+      - run: pnpm exec commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose

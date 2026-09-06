@@ -203,16 +203,28 @@ Publishing runs from GitHub Actions through npm **trusted publishing (OIDC)** �
 
 One-time setup on npm: open <https://www.npmjs.com/package/dsh-supermemory/access>, add a trusted publisher, choose GitHub Actions, and enter organization `nmindz`, repository `dsh-supermemory`, workflow `.github/workflows/release.yml`, environment `production`. Under **Allowed actions**, leave *publish directly* unchecked — staged publishing is all this workflow needs, and it keeps CI from holding a credential that can ship a version by itself.
 
-Then each release is a version bump and a tag: 
+### Conventional Commits drive the version
+
+There is no manual version bump and no hand-written tag. [semantic-release](https://semantic-release.gitbook.io) reads the [Conventional Commits](https://www.conventionalcommits.org) since the last release and decides everything else — the version, `CHANGELOG.md`, the git tag, and the GitHub Release.
+
+| Commit | Result |
+|---|---|
+| `fix: …` | patch — `0.1.0` → `0.1.1` |
+| `feat: …` | minor — `0.1.0` → `0.2.0` |
+| `feat!: …` or a `BREAKING CHANGE:` footer | major |
+| `perf: …`, `refactor: …` | patch |
+| `docs: …`, `test: …`, `chore: …`, `ci: …`, `build: …`, `style: …` | no release |
+
+So a release is just a merge to `master`:
 
 ```sh
-npm version 0.1.1 --no-git-tag-version   # edits package.json only
-git commit -am 'Release v0.1.1'
-git tag -m 'dsh-supermemory v0.1.1' v0.1.1
-git push origin master --tags
+git commit -m 'fix: render the status line from a symlinked install path'
+git push origin master
 ```
 
-The workflow refuses to stage when the tag and `package.json` version disagree, and runs `pnpm run check` first. It then leaves the version waiting for you:
+CI validates the commit, the release workflow runs once CI is green, and if the commits warrant a version it bumps `package.json`, writes `CHANGELOG.md`, tags `vX.Y.Z`, opens the GitHub Release, and stages the npm publish. Pull requests get their commit messages linted so a malformed one cannot silently cost a release.
+
+The version then waits for you:
 
 ```sh
 npm stage list dsh-supermemory   # find the stage id
@@ -229,6 +241,12 @@ To publish by hand instead, skipping staging entirely:
 pnpm run check
 npm publish --access public
 ```
+
+Run semantic-release in CI only. It moves git refs as part of its work, and in a jj-colocated checkout jj re-imports those refs and rolls the working copy back onto them — locally it looks like it ate your unpushed commits. They are recoverable with `jj op log` and `jj op restore <op-id>`, but the tool has no business running there.
+
+### What a release costs
+
+The package is built exactly once per commit. CI's `build` job produces `lib/`, verifies the tarball still carries the skill body and both auth templates, and uploads it; the release workflow downloads that artifact rather than rebuilding, and stages with `--ignore-scripts` so `prepublishOnly` does not rebuild either. Installs in CI use `--ignore-scripts` too, since the package's `prepare` hook exists only to make a git install usable. Runs on a superseded commit cancel themselves.
 
 ## License
 
