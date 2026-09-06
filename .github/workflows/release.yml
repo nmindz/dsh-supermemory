@@ -29,6 +29,7 @@ permissions:
   issues: write # release comments on the issues a release closes
   pull-requests: write
   id-token: write # OIDC for npm trusted publishing
+  actions: read # download the build artifact from the CI run that triggered this
 
 jobs:
   release:
