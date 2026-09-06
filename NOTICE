@@ -1,0 +1,47 @@
+dsh-supermemory
+===============
+
+This package is a native DeepSeek Harness port of the Claude Code `supermemory`
+plugin, version 0.1.6.
+
+Upstream project
+----------------
+
+  Name:      supermemory (Claude Code plugin)
+  Source:    https://github.com/supermemoryai/claude-supermemory
+  Version:   0.1.6
+  Copyright: (c) Supermemory <support@supermemory.ai>
+  License:   MIT
+
+Derived material
+----------------
+
+The following files are line-by-line ports of upstream sources and retain the
+upstream behavior, wire format, prompt text, and file layout:
+
+  src/lib/api.ts               <- plugin/hooks/lib/api.js
+  src/lib/auth.ts              <- plugin/hooks/lib/auth.js
+  src/lib/colors.ts            <- plugin/hooks/lib/colors.js
+  src/lib/container-tag.ts     <- plugin/hooks/lib/container-tag.js
+  src/lib/error-helpers.ts     <- plugin/hooks/lib/error-helpers.js
+  src/lib/git-utils.ts         <- plugin/hooks/lib/git-utils.js
+  src/lib/last-session.ts      <- plugin/hooks/lib/last-session.js
+  src/lib/project-config.ts    <- plugin/hooks/lib/project-config.js
+  src/lib/settings.ts          <- plugin/hooks/lib/settings.js
+  src/lib/statusline-state.ts  <- plugin/hooks/lib/statusline-state.js
+  src/mcp-proxy.ts             <- plugin/hooks/mcp-proxy.js
+  src/statusline.ts            <- plugin/statusline.js
+  src/session-start.ts         <- plugin/hooks/session-start.js
+  src/recall.ts                <- plugin/hooks/recall-directive.js
+  src/approve.ts               <- plugin/hooks/recall-approve.js
+  src/capture.ts               <- plugin/hooks/capture.js
+  src/transcript.ts            <- plugin/hooks/lib/transcript.js
+  src/status.ts                <- plugin/commands/status.md
+  skills/supermemory-context-gatherer/SKILL.md
+                               <- plugin/agents/context-gatherer.md
+  templates/auth-success.html  <- plugin/hooks/templates/auth-success.html (verbatim)
+  templates/auth-error.html    <- plugin/hooks/templates/auth-error.html (verbatim)
+
+Supermemory, the Supermemory mark (◪), and the Supermemory brand colors belong
+to Supermemory. This is an independent port and is not an official Supermemory
+release.
