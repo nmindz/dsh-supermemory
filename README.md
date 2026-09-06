@@ -40,6 +40,7 @@ Override the row in `~/.dsh/profiles/<name>/cordis.patch.yml` (or `~/.dsh/cordis
     mcpServerName: supermemory
     command: true
     contextGatherer: true
+    includeSubagents: false
 ```
 
 | Key | Default | Meaning |
@@ -53,6 +54,7 @@ Override the row in `~/.dsh/profiles/<name>/cordis.patch.yml` (or `~/.dsh/cordis
 | `mcpServerName` | `supermemory` | MCP namespace; tools surface as `mcp__<name>__<tool>` |
 | `command` | `true` | Register `/supermemory-status` |
 | `contextGatherer` | `true` | Register the `supermemory-context-gatherer` skill |
+| `includeSubagents` | `false` | Recall into and capture from delegated subagent sessions too |
 
 ### Environment and files
 
@@ -103,7 +105,9 @@ DSH has no command-hook runner, no markdown command loader, and no markdown agen
 | `commands/status.md` | `ctx.commands.register('supermemory-status')` |
 | `agents/context-gatherer.md` | `ctx.skills.register('supermemory-context-gatherer')` |
 
-Two differences are worth stating plainly:
+DSH dispatches those points to every agent, including delegated subagents, while Claude Code's hooks only ever see the main session. Delegated sessions are therefore filtered out by default; set `includeSubagents: true` to let subagent work recall and capture too.
+
+Two further differences are worth stating plainly:
 
 **Session-start delivery is stronger here.** `agent/session-start` is an emit point that DSH never awaits, so an async memory fetch started there can miss the first request — the same gap the Claude Code hooks bridge documents. This plugin parks the fetch and the first `agent/pre-step`, which *is* awaited, folds it in. The first request always carries the project's memory.
 

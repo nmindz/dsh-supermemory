@@ -49,7 +49,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
     registerRecall(ctx, rt, config)
   }
   if (config.autoApprove !== false) registerApprove(ctx, rt, config)
-  if (config.capture !== false) registerCapture(ctx, rt)
+  if (config.capture !== false) registerCapture(ctx, rt, config)
   if (config.command !== false) registerStatusCommand(ctx, config)
   if (config.contextGatherer !== false) registerContextGatherer(ctx, rt)
 

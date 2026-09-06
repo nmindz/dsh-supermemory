@@ -13,7 +13,7 @@ import { getUserFriendlyError } from './lib/error-helpers.ts'
 import { loadProjectConfig } from './lib/project-config.ts'
 import { loadSettings, getApiKey, getBaseUrl, debugLog, getRecallConfig } from './lib/settings.ts'
 import { atomicWriteJson, getSessionDir, readState, writeState } from './lib/statusline-state.ts'
-import { cwdOf, sessionIdOf, PLUGIN_SOURCE, type SupermemoryRuntime } from './runtime.ts'
+import { cwdOf, isSubagent, sessionIdOf, PLUGIN_SOURCE, type SupermemoryRuntime } from './runtime.ts'
 import type { PluginConfig } from './config.ts'
 
 // Recall is performed HERE, not delegated to the model: the plugin searches
@@ -196,6 +196,7 @@ export function registerRecall(
   config: PluginConfig,
 ): void {
   ctx.on('agent/pre-step', async ({ agent, messages }, next): Promise<PreStepDecision> => {
+    if (isSubagent(agent) && !config.includeSubagents) return next()
     const sessionId = sessionIdOf(agent)
     const cwd = cwdOf(agent)
     const prompt = promptFrom(messages)

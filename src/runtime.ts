@@ -50,3 +50,13 @@ export function cwdOf(agent: Agent | undefined): string {
 export function sessionIdOf(agent: Agent | undefined): string {
   return String(agent?.session.header.id ?? '')
 }
+
+/**
+ * Claude Code fires SessionStart, UserPromptSubmit, and Stop for the main
+ * session only — a Task subagent gets SubagentStart/SubagentStop, which this
+ * plugin does not hook. DSH dispatches the same extension points to every
+ * agent, so delegated sessions are filtered out to keep the behavior identical.
+ */
+export function isSubagent(agent: Agent | undefined): boolean {
+  return agent?.session.header.origin === 'subagent'
+}

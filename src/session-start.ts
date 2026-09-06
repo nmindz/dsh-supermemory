@@ -11,7 +11,7 @@ import { startAuthFlow, AUTH_BASE_URL } from './lib/auth.ts'
 import { getUserFriendlyError } from './lib/error-helpers.ts'
 import { LAST_SESSION_FILE } from './lib/last-session.ts'
 import { pruneState, resolveStatuslineDataDir, writeState } from './lib/statusline-state.ts'
-import { cwdOf, sessionIdOf, type SupermemoryRuntime } from './runtime.ts'
+import { cwdOf, isSubagent, sessionIdOf, type SupermemoryRuntime } from './runtime.ts'
 import type { PluginConfig } from './config.ts'
 
 const STATUSLINE_TIP_FILE = path.join(os.homedir(), '.supermemory-claude', 'statusline-tip-shown')
@@ -194,6 +194,7 @@ export function registerSessionStart(
   ctx.on('agent/session-start', ({ agent }) => {
     const sessionId = sessionIdOf(agent)
     if (!sessionId || rt.bootstraps.has(sessionId)) return
+    if (isSubagent(agent) && !config.includeSubagents) return
     rt.bootstraps.set(
       sessionId,
       bootstrap(rt, config, cwdOf(agent), sessionId).catch((err: unknown) => {

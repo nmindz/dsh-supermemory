@@ -29,6 +29,7 @@ const approve = await import('../src/approve.ts')
 const sessionStart = await import('../src/session-start.ts')
 const status = await import('../src/status.ts')
 const contextGatherer = await import('../src/context-gatherer.ts')
+const runtime = await import('../src/runtime.ts')
 
 after(() => {
   if (REAL_HOME !== undefined) process.env.HOME = REAL_HOME
@@ -380,6 +381,23 @@ describe('statusline rendering', () => {
       frames.add(statusline.renderStatusline(live, { now: now + i * statusline.TICK_MS }))
     }
     assert.equal(frames.size, 10, 'every second must produce a distinct frame')
+  })
+})
+
+describe('session scoping', () => {
+  const agentWith = (header: Record<string, unknown>) => ({ session: { header } }) as never
+
+  test('recognizes delegated sessions so they can be filtered out', () => {
+    assert.equal(runtime.isSubagent(agentWith({ id: 'a', origin: 'subagent' })), true)
+    assert.equal(runtime.isSubagent(agentWith({ id: 'a' })), false)
+    assert.equal(runtime.isSubagent(undefined), false)
+  })
+
+  test('reads the session workspace and id, with safe fallbacks', () => {
+    assert.equal(runtime.cwdOf(agentWith({ id: 'a', cwd: '/repo' })), '/repo')
+    assert.equal(runtime.cwdOf(undefined), process.cwd())
+    assert.equal(runtime.sessionIdOf(agentWith({ id: 'abc' })), 'abc')
+    assert.equal(runtime.sessionIdOf(undefined), '')
   })
 })
 

@@ -12,15 +12,21 @@ import {
   setLastCapturedSeq,
   type TranscriptSession,
 } from './transcript.ts'
-import { cwdOf, sessionIdOf, type SupermemoryRuntime } from './runtime.ts'
+import { cwdOf, isSubagent, sessionIdOf, type SupermemoryRuntime } from './runtime.ts'
+import type { PluginConfig } from './config.ts'
 
 /**
  * `agent/turn-stopping` is serial and awaited, so the save completes before the
  * turn commits. Claude Code runs the same work in an async `Stop` hook; here it
  * is a first-class part of closing the turn.
  */
-export function registerCapture(ctx: Context, rt: SupermemoryRuntime): void {
+export function registerCapture(
+  ctx: Context,
+  rt: SupermemoryRuntime,
+  config: PluginConfig,
+): void {
   ctx.on('agent/turn-stopping', async ({ agent }): Promise<void> => {
+    if (isSubagent(agent) && !config.includeSubagents) return
     const settings = loadSettings()
     const sessionId = sessionIdOf(agent)
 
