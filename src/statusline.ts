@@ -13,6 +13,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { Readable } from 'node:stream'
+import { fileURLToPath } from 'node:url'
 
 const STATE_ROOT = path.join(
   os.homedir(),
@@ -318,6 +319,25 @@ async function main(): Promise<void> {
   }
 }
 
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+/**
+ * Whether this module was run as the entry point.
+ *
+ * Comparing `import.meta.url` to `file://${process.argv[1]}` is wrong twice
+ * over: the template leaves spaces and other reserved characters unescaped,
+ * and `import.meta.url` is already resolved through symlinks while `argv[1]`
+ * is not — so on macOS a script under `/tmp` (a symlink to `/private/tmp`)
+ * never matched and the renderer silently printed nothing. Compare real paths.
+ */
+function invokedDirectly(): boolean {
+  const entry = process.argv[1]
+  if (!entry) return false
+  try {
+    return fs.realpathSync(fileURLToPath(import.meta.url)) === fs.realpathSync(entry)
+  } catch {
+    return false
+  }
+}
+
+if (invokedDirectly()) {
   void main()
 }

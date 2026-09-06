@@ -4,6 +4,7 @@
  */
 import assert from 'node:assert/strict'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
@@ -79,6 +80,49 @@ function homeWithKey(apiKey: string | null): string {
   }
   return home
 }
+
+describe('statusline entry point', () => {
+  test('renders when invoked from a path containing spaces', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh sm space-'))
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-supermemory-sl-'))
+    const script = path.join(dir, 'statusline.mts')
+    fs.copyFileSync(path.join(import.meta.dirname, '..', 'src', 'statusline.ts'), script)
+
+    // Seed one ready context so the renderer has something to print.
+    const stateDir = path.join(
+      home,
+      '.supermemory-claude',
+      'statusline',
+      'statusline-state',
+      createHash('sha256').update('session-space').digest('hex'),
+    )
+    fs.mkdirSync(stateDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(stateDir, 'context.json'),
+      JSON.stringify({ version: 1, event: 'context', updatedAt: Date.now(), status: 'ready', memoryItemsLoaded: 2 }),
+    )
+
+    const child = spawn(
+      process.execPath,
+      ['--experimental-strip-types', '--no-warnings', script],
+      { env: { ...process.env, HOME: home, USERPROFILE: home, NO_COLOR: '1' }, stdio: ['pipe', 'pipe', 'pipe'] },
+    ) as ChildProcessWithoutNullStreams
+
+    const out = await new Promise<string>((resolve) => {
+      let text = ''
+      child.stdout.setEncoding('utf8')
+      child.stdout.on('data', (chunk: string) => { text += chunk })
+      child.on('close', () => resolve(text))
+      child.stdin.write(`${JSON.stringify({ session_id: 'session-space' })}\n`)
+      child.stdin.end()
+    })
+
+    // The renderer always colors; strip ANSI before asserting on the words.
+    const plain = out.replace(/\u001b\[[0-9;]*m/g, '')
+    assert.match(plain, /supermemory/, 'a spaced, symlinked install path must still render')
+    assert.match(plain, /2 loaded/)
+  })
+})
 
 describe('mcp proxy', () => {
   test('forwards requests with the stored key and tracks the MCP session', async () => {

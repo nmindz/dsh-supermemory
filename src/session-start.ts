@@ -28,7 +28,7 @@ function statuslineTip(): string | null {
     if (fs.existsSync(STATUSLINE_TIP_FILE)) return null
     fs.mkdirSync(path.dirname(STATUSLINE_TIP_FILE), { recursive: true })
     fs.writeFileSync(STATUSLINE_TIP_FILE, new Date().toISOString())
-    return `${MARK} supermemory status is live — render it anywhere with \`node -e "require('dsh-supermemory/statusline')" <<< '{"session_id":"…"}'\`, or read ~/.supermemory-claude/statusline.`
+    return `${MARK} supermemory status is live — render it anywhere with \`echo '{"session_id":"…"}' | node -e "import('dsh-supermemory/statusline')"\`, or read ~/.supermemory-claude/statusline.`
   } catch {
     return null
   }
