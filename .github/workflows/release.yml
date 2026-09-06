@@ -13,7 +13,14 @@ on:
 # workflow's identity, so no NPM_TOKEN secret exists to leak or rotate.
 # Configure it once at https://www.npmjs.com/package/dsh-supermemory/access
 # -> Trusted publisher -> GitHub Actions, repository nmindz/dsh-supermemory,
-# workflow .github/workflows/release.yml. Provenance is attached automatically.
+# workflow .github/workflows/release.yml, environment production. The name
+# must match the `environment:` below exactly, or npm rejects the OIDC claim.
+#
+# Leave "publish directly" UNCHECKED under Allowed actions. This job stages
+# the release instead: the tarball and its provenance are uploaded, and the
+# version goes live only after a human runs `npm stage approve <stage-id>`
+# with a 2FA code. CI therefore never holds a credential that can publish on
+# its own, and a compromised workflow run cannot ship a version by itself.
 permissions:
   contents: read
   id-token: write
@@ -21,7 +28,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment: npm
+    environment: production
     steps:
       - uses: actions/checkout@v5
         with:
@@ -54,5 +61,14 @@ jobs:
 
       - run: pnpm run check
 
-      - name: Publish to npm with provenance
-        run: npm publish --access public --provenance
+      - name: Stage the release on npm with provenance
+        run: npm stage publish --access public --provenance
+
+      - name: Report what is waiting for approval
+        run: |
+          echo "Staged. Approve it to make the version live:"
+          npm stage list dsh-supermemory || true
+          echo
+          echo "  npm stage view <stage-id>      # inspect first"
+          echo "  npm stage approve <stage-id>   # publishes, asks for 2FA"
+          echo "  npm stage reject <stage-id>    # discards it"

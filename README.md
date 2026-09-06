@@ -199,22 +199,31 @@ Requires Node `^22.19.0 || >=24.0.0`.
 
 ## Releasing
 
-Publishing runs from GitHub Actions through npm **trusted publishing (OIDC)** — no `NPM_TOKEN` secret exists, and every release carries provenance.
+Publishing runs from GitHub Actions through npm **trusted publishing (OIDC)** — no `NPM_TOKEN` secret exists, and every release carries provenance. CI does not publish on its own: it *stages* the release, and a human approves it with a 2FA code.
 
-One-time setup on npm: open <https://www.npmjs.com/package/dsh-supermemory/access>, add a trusted publisher, choose GitHub Actions, and enter organization `nmindz`, repository `dsh-supermemory`, workflow `.github/workflows/release.yml`, environment `npm`.
+One-time setup on npm: open <https://www.npmjs.com/package/dsh-supermemory/access>, add a trusted publisher, choose GitHub Actions, and enter organization `nmindz`, repository `dsh-supermemory`, workflow `.github/workflows/release.yml`, environment `production`. Under **Allowed actions**, leave *publish directly* unchecked — staged publishing is all this workflow needs, and it keeps CI from holding a credential that can ship a version by itself.
 
-Then each release is a version bump and a tag:
+Then each release is a version bump and a tag: 
 
 ```sh
 npm version 0.1.1 --no-git-tag-version   # edits package.json only
 git commit -am 'Release v0.1.1'
-git tag v0.1.1
+git tag -m 'dsh-supermemory v0.1.1' v0.1.1
 git push origin master --tags
 ```
 
-The workflow refuses to publish when the tag and `package.json` version disagree, and runs `pnpm run check` before it publishes.
+The workflow refuses to stage when the tag and `package.json` version disagree, and runs `pnpm run check` first. It then leaves the version waiting for you:
 
-To publish by hand instead (requires `npm login` or a configured token):
+```sh
+npm stage list dsh-supermemory   # find the stage id
+npm stage view <stage-id>        # inspect the tarball and provenance
+npm stage approve <stage-id>     # publishes it; asks for your 2FA code
+npm stage reject <stage-id>      # discards it instead
+```
+
+Requires npm ≥ 11.19 locally (`npm install -g npm@latest`).
+
+To publish by hand instead, skipping staging entirely:
 
 ```sh
 pnpm run check
