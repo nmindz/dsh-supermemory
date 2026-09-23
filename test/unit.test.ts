@@ -264,6 +264,74 @@ describe('transcript delta', () => {
     assert.deepEqual(entries.map(entry => entry.type), ['user', 'assistant', 'user'])
     assert.deepEqual(entries.map(entry => entry.seq), [1, 2, 3])
   })
+
+  // DSH 0.1.7: tool results are role 'tool' messages carrying toolCallId and
+  // isError, with the raw result blocks as content; injected context shares
+  // the user/message event with direct prompts.
+  const events017 = [
+    events[0]!,
+    events[1]!,
+    {
+      type: 'user/message',
+      seq: 2,
+      time: 1_700_000_000_500,
+      data: {
+        source: { kind: 'skill-invocation', name: 'supermemory-index', form: 'instructions' },
+        content: [{ type: 'text', text: '# Codebase Indexing — an injected skill body the user never typed' }],
+      },
+    },
+    { ...events[2]!, seq: 3 },
+    {
+      type: 'tool/result',
+      seq: 4,
+      time: 1_700_000_002_000,
+      data: {
+        turn: 1,
+        step: 1,
+        message: {
+          role: 'tool',
+          source: { kind: 'tool' },
+          toolCallId: 'call-1',
+          isError: false,
+          content: [{ type: 'text', text: 'export const session = createSessionStore()' }],
+        },
+      },
+    },
+  ]
+  const session017 = {
+    snapshotEvents(fromSeq?: number) {
+      return events017.filter(event => event.seq >= (fromSeq ?? 0))
+    },
+  }
+
+  test('reads 0.1.7 tool-role results as tool results, not user speech', () => {
+    const cwd = makeRepo('git@github.com:acme/widgets.git')
+    const configDir = path.join(cwd, '.claude', '.supermemory-claude')
+    fs.mkdirSync(configDir, { recursive: true })
+    fs.writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({ includeTools: ['read'] }))
+    const delta = transcript.formatNewEntries(session017, 'session-017-a', cwd)
+    assert.match(
+      delta!.formatted,
+      /<\|start\|>assistant:tool_result<\|message\|>read\(success\): export const session = createSessionStore\(\)<\|end\|>/,
+    )
+    assert.ok(!delta!.formatted.includes('<|start|>user<|message|>export const'), 'tool output must never read as the user')
+    assert.equal(delta!.lastSeq, 4)
+  })
+
+  test('drops 0.1.7 tool results unless includeTools names the tool', () => {
+    const cwd = makeRepo('git@github.com:acme/widgets.git')
+    const delta = transcript.formatNewEntries(session017, 'session-017-b', cwd)
+    assert.ok(!delta!.formatted.includes('createSessionStore'), 'unlisted tool output stays out entirely')
+  })
+
+  test('captures only direct human prompts from user/message events', () => {
+    const cwd = makeRepo('git@github.com:acme/widgets.git')
+    const delta = transcript.formatNewEntries(session017, 'session-017-c', cwd)
+    assert.match(delta!.formatted, /<\|start\|>user<\|message\|>refactor the auth module<\|end\|>/)
+    assert.ok(!delta!.formatted.includes('injected skill body'), 'injected context is not conversation')
+    const entries = transcript.entriesFromEvents(events017)
+    assert.deepEqual(entries.map(entry => entry.seq), [1, 3, 4])
+  })
 })
 
 describe('statusline state', () => {

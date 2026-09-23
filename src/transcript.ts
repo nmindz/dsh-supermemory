@@ -87,6 +87,29 @@ function blocksOf(value: unknown): TranscriptBlock[] {
 }
 
 /**
+ * `user/message` also carries injected context (skill bodies, goal rounds,
+ * workspace rules); only a direct human prompt is conversation. An event
+ * without a source predates source stamping and counts as human.
+ */
+function isHumanPrompt(data: unknown): boolean {
+  const kind = (data as { source?: { kind?: unknown } } | undefined)?.source?.kind
+  return kind === undefined || kind === 'user'
+}
+
+/**
+ * A tool-role message carries its call id and outcome on the message and its
+ * raw result blocks as content; fold them into the one tool-result block the
+ * Claude Code formatter reads. Already-wrapped content passes through.
+ */
+function toolResultBlocks(message: unknown): TranscriptBlock[] {
+  const blocks = blocksOf(message)
+  if (blocks.some(block => block.type === 'tool-result')) return blocks
+  const { toolCallId, isError } = (message ?? {}) as { toolCallId?: unknown; isError?: unknown }
+  if (typeof toolCallId !== 'string') return []
+  return [{ type: 'tool-result', toolCallId, content: blocks, isError: isError === true }]
+}
+
+/**
  * Project session-log events onto the user/assistant entry list the Claude
  * Code formatter expects. A `tool/result` event becomes a user entry carrying
  * one tool-result block, exactly where Claude Code's transcript puts it.
@@ -96,13 +119,14 @@ export function entriesFromEvents(events: readonly TranscriptEvent[]): Transcrip
   for (const event of events) {
     const timestamp = new Date(event.time ?? Date.now()).toISOString()
     if (event.type === 'user/message') {
+      if (!isHumanPrompt(event.data)) continue
       entries.push({ type: 'user', seq: event.seq, timestamp, content: blocksOf(event.data) })
     } else if (event.type === 'assistant/message') {
       const message = (event.data as { message?: unknown })?.message
       entries.push({ type: 'assistant', seq: event.seq, timestamp, content: blocksOf(message) })
     } else if (event.type === 'tool/result') {
       const message = (event.data as { message?: unknown })?.message
-      entries.push({ type: 'user', seq: event.seq, timestamp, content: blocksOf(message) })
+      entries.push({ type: 'user', seq: event.seq, timestamp, content: toolResultBlocks(message) })
     }
   }
   return entries
