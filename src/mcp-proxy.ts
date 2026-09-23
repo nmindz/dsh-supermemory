@@ -3,8 +3,14 @@
  * authenticating with the same credentials file the plugin uses — one browser
  * login covers both. Messages are forwarded sequentially to preserve JSON-RPC
  * ordering; SSE responses are unwrapped back into stdout lines.
+ *
+ * Space-scoped tool calls without a containerTag get the tag of this process's
+ * cwd. DSH spawns one proxy per host, so that cwd is the host's, not a
+ * session's; the plugin guards sessions whose container differs.
  */
 import readline from 'node:readline'
+import { getContainerTag } from './lib/container-tag.ts'
+import { argumentRecord, explicitContainerTag, REPO_SCOPED_TOOLS } from './lib/mcp-scope.ts'
 import { getApiKey } from './lib/settings.ts'
 
 const MCP_URL = process.env.SUPERMEMORY_MCP_URL || 'https://mcp.supermemory.ai/mcp'
@@ -14,7 +20,27 @@ let sessionId: string | null = null
 
 interface JsonRpcMessage {
   id?: string | number | null
+  method?: unknown
+  params?: unknown
   [key: string]: unknown
+}
+
+// Hosted MCP defaults a missing containerTag to activeSpace; default space-scoped calls to this repo instead.
+function injectRepoContainerTag(message: JsonRpcMessage, containerTag: string | null): void {
+  if (!containerTag || message.method !== 'tools/call') return
+  const params = message.params as { name?: unknown; arguments?: unknown } | null | undefined
+  if (!params || typeof params !== 'object') return
+  if (typeof params.name !== 'string' || !REPO_SCOPED_TOOLS.has(params.name)) return
+
+  const record = argumentRecord(params.arguments)
+  if (record === null) {
+    params.arguments = { containerTag }
+    return
+  }
+  if (!record || explicitContainerTag(record)) return
+
+  record.containerTag = containerTag
+  params.arguments = typeof params.arguments === 'string' ? JSON.stringify(record) : record
 }
 
 function send(message: unknown): void {
@@ -78,12 +104,19 @@ async function forward(message: JsonRpcMessage, apiKey: string): Promise<void> {
 }
 
 function main(): void {
+  const cwd = process.cwd()
   let apiKey: string | null = null
   let keyError: unknown = null
+  let repoContainerTag: string | null = null
   try {
-    apiKey = getApiKey(process.cwd())
+    apiKey = getApiKey(cwd)
   } catch (err) {
     keyError = err
+  }
+  try {
+    repoContainerTag = getContainerTag(cwd)
+  } catch {
+    repoContainerTag = null
   }
 
   let queue = Promise.resolve()
@@ -108,6 +141,7 @@ function main(): void {
         return
       }
       try {
+        injectRepoContainerTag(message, repoContainerTag)
         await forward(message, apiKey as string)
       } catch (err) {
         sendError(message.id, -32000, `Supermemory MCP proxy error: ${(err as Error).message}`)

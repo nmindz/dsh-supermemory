@@ -41,7 +41,7 @@ jobs:
 
       - run: pnpm pack
 
-      # lib/ is only part of the payload: the plugin reads the skill body and
+      # lib/ is only part of the payload: the plugin reads both skill bodies and
       # both auth templates from disk at runtime, and they live outside lib/.
       # A bad `files` list would otherwise surface only at install time.
       - name: Verify tarball contents
@@ -54,6 +54,7 @@ jobs:
             package/lib/statusline.mjs \
             package/cordis.patch.yml \
             package/skills/supermemory-context-gatherer/SKILL.md \
+            package/skills/supermemory-index/SKILL.md \
             package/templates/auth-success.html \
             package/templates/auth-error.html
           do

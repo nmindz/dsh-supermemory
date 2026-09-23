@@ -13,7 +13,14 @@ import { getUserFriendlyError } from './lib/error-helpers.ts'
 import { loadProjectConfig } from './lib/project-config.ts'
 import { loadSettings, getApiKey, getBaseUrl, debugLog, getRecallConfig } from './lib/settings.ts'
 import { atomicWriteJson, getSessionDir, readState, writeState } from './lib/statusline-state.ts'
-import { cwdOf, isSubagent, sessionIdOf, PLUGIN_SOURCE, type SupermemoryRuntime } from './runtime.ts'
+import {
+  cwdOf,
+  defaultsToProject,
+  isSubagent,
+  sessionIdOf,
+  PLUGIN_SOURCE,
+  type SupermemoryRuntime,
+} from './runtime.ts'
 import type { PluginConfig } from './config.ts'
 
 // Recall is performed HERE, not delegated to the model: the plugin searches
@@ -25,8 +32,14 @@ const MAX_QUERY_LENGTH = 500
 const MAX_RESULTS = 5
 const MAX_RESULT_CHARS = 300
 const MIN_SIMILARITY = 0.55
-const SEARCH_TIMEOUT_MS = 3000
+const SEARCH_TIMEOUT_MS = 4000
 const MAX_SEEN_HASHES = 500
+
+/** `AbortSignal.timeout` rejects with TimeoutError; a plain abort with AbortError. */
+export function isTimeout(err: unknown): boolean {
+  const name = (err as { name?: unknown } | null)?.name
+  return name === 'TimeoutError' || name === 'AbortError'
+}
 
 export function shouldSkip(prompt: string): boolean {
   if (prompt.length < MIN_PROMPT_LENGTH) return true
@@ -66,7 +79,60 @@ function readSeenHashes(sessionDir: string): string[] {
   }
 }
 
-export function formatRecall(results: SearchHit[], containerTag: string): string {
+// The hook can only inject what it finds. When a project has no stored memories
+// the model gets silence — and silence reads as "there is nothing to search",
+// so it never reaches for the tool and any history living in another container
+// stays invisible. Say once per session that the tool exists, what to scope it
+// to, and that the call is free. Once per session, because this fires on a miss
+// and misses are the common case in an empty project: repeating it would tax
+// every prompt and invite a search on turns where memory is irrelevant.
+const DISCOVERY_MARKER = 'discovery.json'
+
+function discoverySent(sessionDir: string): boolean {
+  return fs.existsSync(path.join(sessionDir, DISCOVERY_MARKER))
+}
+
+function markDiscoverySent(sessionDir: string): void {
+  try {
+    atomicWriteJson(path.join(sessionDir, DISCOVERY_MARKER), { sentAt: new Date().toISOString() })
+  } catch {
+    // Best effort: a failed marker only risks repeating the notice.
+  }
+}
+
+/** How the model reaches the search tool in this session. */
+export interface SearchGuidance {
+  /** Model-visible name of the search tool. */
+  toolName: string
+  /** A search without containerTag already lands in this project's container. */
+  defaultsToProject: boolean
+  /** Read-only supermemory calls run without an approval prompt. */
+  autoApproved: boolean
+}
+
+// DSH has no deferred tool loading, so the exact mounted name is the pointer.
+export function formatDiscovery(containerTag: string, guidance: SearchGuidance): string {
+  const bullets = [
+    `- Scope to this project with containerTag: "${containerTag}"`,
+    guidance.defaultsToProject
+      ? '- Omitting containerTag also lands here; pass another tag only to search a\n  different space (list_spaces finds them).'
+      : '- Always pass it here: a search without containerTag does not land in this\n  project\'s container.',
+    guidance.autoApproved ? '- Read-only supermemory calls are auto-approved; they never prompt the user.' : null,
+  ].filter(Boolean)
+  return `<supermemory-recall>
+No stored memories matched this prompt for this project.
+
+Deeper history may still exist. Search it with the supermemory search_memory
+tool — exposed here as ${guidance.toolName}.
+
+${bullets.join('\n')}
+
+Worth a call when the user refers to past decisions, earlier sessions, or says
+"remember" / "we decided" / "last time". Skip it for self-contained tasks.
+</supermemory-recall>`
+}
+
+export function formatRecall(results: SearchHit[], containerTag: string, defaultsToProject = true): string {
   const lines = results.map((r) => {
     const text = (resultText(r) ?? '').replace(/\s+/g, ' ').slice(0, MAX_RESULT_CHARS)
     const title = typeof r.title === 'string' && r.title.trim() ? r.title.trim() : null
@@ -74,11 +140,14 @@ export function formatRecall(results: SearchHit[], containerTag: string): string
     const where = typeof r.filepath === 'string' && r.filepath ? ` (${r.filepath})` : ''
     return `- ◪ ${prefix}${text}${where}`
   })
+  const deeper = defaultsToProject
+    ? `For deeper history, call the supermemory search_memory tool — it defaults to this project's container (${containerTag}). Pass containerTag only to search a different space. Or launch the supermemory-context-gatherer skill.`
+    : `For deeper history, call the supermemory search_memory tool (containerTag: "${containerTag}") or launch the supermemory-context-gatherer skill.`
   return `<supermemory-recall>
 ◪ Recalled from supermemory for this prompt (relevance-ranked):
 ${lines.join('\n')}
 
-When one of these shapes your answer, credit it naturally with the ◪ prefix (e.g. "◪ earlier you decided X"); if you name the source, say "from supermemory" — never "from memory". For deeper history, call the supermemory search_memory tool (containerTag: "${containerTag}") or launch the supermemory-context-gatherer skill.
+When one of these shapes your answer, credit it naturally with the ◪ prefix (e.g. "◪ earlier you decided X"); if you name the source, say "from supermemory" — never "from memory". ${deeper}
 </supermemory-recall>`
 }
 
@@ -101,6 +170,7 @@ export function promptFrom(messages: readonly UserMessage[]): string {
 
 async function recallFor(
   rt: SupermemoryRuntime,
+  config: PluginConfig,
   cwd: string,
   sessionId: string,
   prompt: string,
@@ -156,7 +226,23 @@ async function recallFor(
       fresh: fresh.length,
     })
 
-    if (fresh.length === 0) return null
+    const defaults = defaultsToProject(rt, containerTag)
+
+    if (fresh.length === 0) {
+      // Only when the container is genuinely empty: if results came back but
+      // were all repeats, formatRecall already delivered the same guidance
+      // earlier this session.
+      if (results.length === 0 && sessionDir && !discoverySent(sessionDir)) {
+        markDiscoverySent(sessionDir)
+        rt.notify('no memories yet for this project')
+        return formatDiscovery(containerTag, {
+          toolName: `mcp__${config.mcpServerName ?? 'supermemory'}__search_memory`,
+          defaultsToProject: defaults,
+          autoApproved: config.autoApprove !== false,
+        })
+      }
+      return null
+    }
 
     if (sessionDir) {
       try {
@@ -169,7 +255,7 @@ async function recallFor(
       }
     }
 
-    const context = formatRecall(fresh, containerTag)
+    const context = formatRecall(fresh, containerTag, defaults)
     // ~4 chars/token: close enough to show what the injection costs.
     const tok = gray(`(${Math.round(context.length / 4)} tok)`)
     rt.notify(
@@ -180,6 +266,8 @@ async function recallFor(
     return context
   } catch (err) {
     debugLog(settings, 'Recall directive error', { error: (err as Error).message })
+    // A slow recall should not interrupt every prompt with an error banner.
+    if (isTimeout(err)) return null
     rt.notify(red(`recall failed: ${getUserFriendlyError(err).slice(0, 80)}`))
     return null
   }
@@ -209,7 +297,7 @@ export function registerRecall(
     const bootstrapText = pending ? await pending : null
 
     const recallText = config.recall !== false && prompt.length > 0
-      ? await recallFor(rt, cwd, sessionId, prompt)
+      ? await recallFor(rt, config, cwd, sessionId, prompt)
       : null
 
     const downstream = await next()

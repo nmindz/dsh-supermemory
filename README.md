@@ -2,15 +2,16 @@
 
 Persistent memory across [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) sessions, using [Supermemory](https://supermemory.ai).
 
-A native port of the Claude Code `supermemory` plugin v0.1.6 ([supermemoryai/claude-supermemory](https://github.com/supermemoryai/claude-supermemory)). Same memories, same containers, same credentials file, same wire format — so a repository you have been working on in Claude Code arrives in DSH already remembering, and everything DSH captures shows up in Claude Code.
+A native port of the Claude Code `supermemory` plugin v0.1.8 ([supermemoryai/claude-supermemory](https://github.com/supermemoryai/claude-supermemory)). Same memories, same containers, same credentials file, same wire format — so a repository you have been working on in Claude Code arrives in DSH already remembering, and everything DSH captures shows up in Claude Code.
 
 ## What it does
 
 - **Recalls at session start.** Your project's memory profile is fetched and injected before the first model request.
-- **Recalls on every prompt.** Each substantive prompt searches supermemory and injects the relevance-ranked matches, deduplicated for the life of the session, instead of waiting for the model to spend a tool call.
+- **Recalls on every prompt.** Each substantive prompt searches supermemory and injects the relevance-ranked matches, deduplicated for the life of the session, instead of waiting for the model to spend a tool call. When a project has no memories yet, the first miss of a session tells the model once that the search tool exists and how to scope it, so history living in another container stays reachable.
 - **Captures every turn.** When a turn closes, the new conversation delta is condensed into durable memory under this repository's container.
-- **Runs read-only memory tools without asking.** `search_memory`, `listSpaces`, `whoAmI` and friends never raise an approval prompt; writes still do.
-- **Mounts the hosted MCP server.** The bundled stdio proxy authenticates with the same key, so `mcp__supermemory__*` tools are available with no extra configuration.
+- **Runs read-only memory tools without asking.** `search_memory`, `list_spaces`, `who_am_i` and friends never raise an approval prompt; writes still do.
+- **Mounts the hosted MCP server.** The bundled stdio proxy authenticates with the same key, so `mcp__supermemory__*` tools are available with no extra configuration. Space-scoped calls that omit `containerTag` land in this repository's container instead of the account's active space.
+- **Indexes a codebase on request.** `/supermemory-index` explores the repository and saves a few focused memories about its architecture, conventions, and key files.
 
 Everything recalled from supermemory is marked `◪`, and the model is instructed to keep that mark when it cites a memory.
 
@@ -64,7 +65,7 @@ Restart the profile:
 dsh --profile tui
 ```
 
-On the first session with no stored key the browser login opens, and the key lands in `~/.supermemory-claude/credentials.json` — the same file the Claude Code plugin uses, so one login covers both. To skip the browser entirely:
+On the first session with no stored key the browser login opens, and the key lands in `~/.supermemory-claude/credentials.json` — the same file the Claude Code plugin uses, so one login covers both. To skip the browser entirely, set a key from [console.supermemory.ai](https://console.supermemory.ai):
 
 ```sh
 export SUPERMEMORY_CC_API_KEY=sm_your_key_here
@@ -109,6 +110,7 @@ Override the row in `~/.dsh/profiles/<name>/cordis.patch.yml` (or `~/.dsh/cordis
     mcpServerName: supermemory
     command: true
     contextGatherer: true
+    index: true
     includeSubagents: false
 ```
 
@@ -117,12 +119,13 @@ Override the row in `~/.dsh/profiles/<name>/cordis.patch.yml` (or `~/.dsh/cordis
 | `injectProfile` | `true` | Inject this project's memory profile at session start |
 | `recall` | `true` | Search supermemory with each prompt and inject the matches |
 | `capture` | `true` | Save each turn's delta back to supermemory |
-| `autoApprove` | `true` | Run read-only supermemory MCP tools without an approval prompt |
+| `autoApprove` | `true` | Run read-only supermemory MCP tools without an approval prompt, and `add_memory` during a `/supermemory-index` run |
 | `browserLogin` | `true` | Open the browser login when no API key is configured |
 | `mcp` | `true` | Mount the hosted supermemory MCP server through the bundled proxy |
 | `mcpServerName` | `supermemory` | MCP namespace; tools surface as `mcp__<name>__<tool>` |
 | `command` | `true` | Register `/supermemory-status` |
 | `contextGatherer` | `true` | Register the `supermemory-context-gatherer` skill |
+| `index` | `true` | Register the user-only `supermemory-index` skill (`/supermemory-index`) |
 | `includeSubagents` | `false` | Recall into and capture from delegated subagent sessions too |
 
 ### Environment and files
@@ -160,6 +163,16 @@ Reports the active project and container tag, whether a key is present and where
 
 The `supermemory-context-gatherer` skill fans several searches out across the project's containers and returns a synthesized brief with provenance. Use it when starting significant work, resuming after time away, or when one memory search cannot cover the history the conversation needs.
 
+## Indexing a codebase
+
+```
+/supermemory-index
+```
+
+Type it at the start of a prompt, or anywhere in one as a standalone token. The agent detects the ecosystem, explores the manifests, entry points, conventions, and key files, then saves several focused memories into this repository's container and reports `Codebase indexed — N memories saved about <project>`. Those `add_memory` writes run without an approval prompt until your next prompt, as the Claude Code command's `allowed-tools` grants them; set `autoApprove: false` to be asked for each one.
+
+It ships as a user-only skill, so the model never starts an index run on its own. The gesture is resolved by `@deepseek-ai/dsh-tool-skill`, which the `@deepseek-ai/dsh-base` bundle mounts.
+
 ## How the Claude Code plugin maps onto DSH
 
 DSH has no command-hook runner, no markdown command loader, and no markdown agent loader. Each Claude Code hook becomes a typed listener on the equivalent DSH extension point:
@@ -172,11 +185,14 @@ DSH has no command-hook runner, no markdown command loader, and no markdown agen
 | `Stop` hook (async) | `agent/turn-stopping` serial listener, awaited before the turn commits |
 | `.mcp.json` server | `@deepseek-ai/dsh-mcp-client` mounted as a child plugin |
 | `commands/status.md` | `ctx.commands.register('supermemory-status')` |
+| `commands/index.md` | `ctx.skills.register('supermemory-index')`, user-only, invoked as `/supermemory-index` |
 | `agents/context-gatherer.md` | `ctx.skills.register('supermemory-context-gatherer')` |
 
 DSH dispatches those points to every agent, including delegated subagents, while Claude Code's hooks only ever see the main session. Delegated sessions are therefore filtered out by default; set `includeSubagents: true` to let subagent work recall and capture too.
 
-Two further differences are worth stating plainly:
+Three further differences are worth stating plainly:
+
+**One MCP proxy serves the whole host.** Claude Code spawns the proxy per session, inside the project, so the proxy can fill a missing `containerTag` from its own working directory. DSH spawns it once per host, in the directory `dsh` was launched from — and `dsh web` runs sessions from many workspaces through that one process. The proxy still fills a missing tag from its own directory, and wherever that matches the session's project (the usual `dsh` launched inside a repository) behavior is identical to upstream. Where it does not, a tag-less space-scoped call is refused before it runs, and the refusal names the exact `containerTag` to retry with, so neither a search nor a write can land in the wrong container. The recall text tells the model which of the two cases it is in, and `/supermemory-status` reports it on its `mcp scope` line.
 
 **Session-start delivery is stronger here.** Claude Code's detached SessionStart hook can miss the first request. This plugin starts the memory fetch in `agent/created` without holding up agent creation, parks it, and the first `agent/pre-step`, which is awaited, folds it in. The first request always carries the project's memory.
 

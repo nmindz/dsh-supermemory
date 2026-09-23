@@ -6,7 +6,7 @@ import { CREDENTIALS_FILE, loadCredentials, AUTH_BASE_URL } from './lib/auth.ts'
 import { getContainerTag, getProjectName } from './lib/container-tag.ts'
 import { loadProjectConfig } from './lib/project-config.ts'
 import { getBaseUrl, SETTINGS_FILE } from './lib/settings.ts'
-import { cwdOf } from './runtime.ts'
+import { cwdOf, type SupermemoryRuntime } from './runtime.ts'
 import type { PluginConfig } from './config.ts'
 
 const PROBE_TIMEOUT_MS = 8000
@@ -107,8 +107,16 @@ async function probe(baseUrl: string, key: string, containerTag: string): Promis
   }
 }
 
+/** Where a tag-less space-scoped MCP call from this session lands. */
+export function mcpScopeLine(proxyTag: string | null, containerTag: string): string {
+  if (proxyTag === null) return 'no bundled proxy — pass containerTag explicitly'
+  if (proxyTag === containerTag) return 'tag-less calls default to this project'
+  return `tag-less calls would land in ${proxyTag} (host cwd), so they are refused here`
+}
+
 export function registerStatusCommand(
   ctx: Context,
+  rt: SupermemoryRuntime,
   config: PluginConfig,
 ): void {
   ctx.inject(['commands'], (commandCtx) => {
@@ -169,6 +177,7 @@ export function registerStatusCommand(
             `api            ${baseUrl}`,
             `api probe      ${probed.detail}`,
             `mcp            ${mcpTools.length > 0 ? `${mcpTools.length} tool${mcpTools.length === 1 ? '' : 's'} under ${prefix}` : `no ${prefix}* tools registered`}`,
+            `mcp scope      ${mcpScopeLine(rt.proxyContainerTag(), containerTag)}`,
             `settings       ${SETTINGS_FILE}`,
           ].join('\n'),
         }

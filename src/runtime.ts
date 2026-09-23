@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import { BRAND, gray } from './lib/colors.ts'
+import { getContainerTag } from './lib/container-tag.ts'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
@@ -25,6 +26,13 @@ export interface SupermemoryRuntime {
   readonly ctx: Context
   readonly bootstraps: Map<string, Promise<string | null>>
   readonly delivered: Set<string>
+  /** Sessions whose latest prompt invoked `/supermemory-index`. */
+  readonly indexing: Set<string>
+  /**
+   * Where a tag-less space-scoped call through the bundled proxy lands: the
+   * container of the proxy's cwd. Null when the proxy is not mounted.
+   */
+  proxyContainerTag(): string | null
   /**
    * User-facing one-liner. Claude Code renders these as hook `systemMessage`s;
    * DSH exposes no equivalent transient channel, so they go to the logger and
@@ -34,12 +42,24 @@ export interface SupermemoryRuntime {
   warn(text: string): void
 }
 
-export function createRuntime(ctx: Context): SupermemoryRuntime {
+/** @param proxyCwd - the cwd the bundled MCP proxy is spawned in, or null when it is not mounted. */
+export function createRuntime(ctx: Context, proxyCwd: string | null = null): SupermemoryRuntime {
   const logger = ctx.logger('supermemory')
+  let proxyTag: string | null | undefined
   return {
     ctx,
     bootstraps: new Map(),
     delivered: new Set(),
+    indexing: new Set(),
+    proxyContainerTag() {
+      if (proxyTag !== undefined) return proxyTag
+      try {
+        proxyTag = proxyCwd === null ? null : getContainerTag(proxyCwd)
+      } catch {
+        proxyTag = null
+      }
+      return proxyTag
+    },
     notify(text: string) {
       logger.info(`${BRAND} ${gray('·')} ${text}`)
     },
@@ -47,6 +67,11 @@ export function createRuntime(ctx: Context): SupermemoryRuntime {
       logger.warn(`${BRAND} ${gray('·')} ${text}`)
     },
   }
+}
+
+/** Whether a tag-less space-scoped call from a session in `containerTag` already lands there. */
+export function defaultsToProject(rt: SupermemoryRuntime, containerTag: string): boolean {
+  return rt.proxyContainerTag() === containerTag
 }
 
 /** The session workspace an agent runs in, matching every other DSH plugin. */

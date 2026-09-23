@@ -21,8 +21,8 @@ SKIP:
 - Granular details that do not help future work`
 
 // Listeners sit between the user and the model — a slow or dead network must
-// never hold the session hostage, so every request is capped hard at 3s and
-// callers treat failure as "no memory this time", not a blocker.
+// never hold the session hostage. Requests default to 3s; prompt recall allows
+// 4s. Callers treat failure as "no memory this time", not a blocker.
 export const REQUEST_TIMEOUT_MS = 3000
 
 export interface ProfileResult {

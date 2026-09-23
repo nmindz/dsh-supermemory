@@ -30,6 +30,7 @@ const sessionStart = await import('../src/session-start.ts')
 const status = await import('../src/status.ts')
 const contextGatherer = await import('../src/context-gatherer.ts')
 const runtime = await import('../src/runtime.ts')
+const mcpScope = await import('../src/lib/mcp-scope.ts')
 
 after(() => {
   if (REAL_HOME !== undefined) process.env.HOME = REAL_HOME
@@ -121,8 +122,30 @@ describe('recall', () => {
     assert.match(block, /- ◪ ORM — chose Drizzle over Prisma \(docs\/adr\.md\)/)
     assert.match(block, /- ◪ ORM notes carry their own title/)
     assert.ok(!block.includes('ORM notes — ORM notes'), 'a leading title must not be repeated')
-    assert.match(block, /containerTag: "repo_widgets__deadbeefdeadbeef"/)
+    assert.match(block, /defaults to this project's container \(repo_widgets__deadbeefdeadbeef\)/)
+    assert.doesNotMatch(block, /omit containerTag to search the account/i)
+    assert.match(block, /Pass containerTag only to search a different space/)
     assert.match(block, /never "from memory"/)
+  })
+
+  test('asks for an explicit tag where tag-less searches land elsewhere', () => {
+    const block = recall.formatRecall([{ memory: 'x' }], 'repo_widgets__deadbeefdeadbeef', false)
+    assert.match(block, /search_memory tool \(containerTag: "repo_widgets__deadbeefdeadbeef"\)/)
+    assert.doesNotMatch(block, /defaults to this project's container/)
+  })
+
+  test('formats the discovery block for the mounted tool name', () => {
+    const block = recall.formatDiscovery('repo_widgets__deadbeefdeadbeef', {
+      toolName: 'mcp__memories__search_memory',
+      defaultsToProject: true,
+      autoApproved: false,
+    })
+    assert.match(block, /^<supermemory-recall>\nNo stored memories matched this prompt for this project\./)
+    assert.match(block, /exposed here as mcp__memories__search_memory\./)
+    assert.match(block, /- Scope to this project with containerTag: "repo_widgets__deadbeefdeadbeef"/)
+    assert.doesNotMatch(block, /auto-approved/, 'no approval claim when auto-approval is off')
+    assert.doesNotMatch(block, /active\/shared space/, 'a tag-less search no longer reaches activeSpace')
+    assert.match(block, /Skip it for self-contained tasks\.\n<\/supermemory-recall>$/)
   })
 
   test('reads the direct prompt and ignores injected context', () => {
@@ -152,6 +175,56 @@ describe('auto-approve', () => {
     assert.equal(approve.readOnlyToolOf('mcp__supermemory__save-memory', 'supermemory'), null)
     assert.equal(approve.readOnlyToolOf('read', 'supermemory'), null)
     assert.equal(approve.readOnlyToolOf('mcp__github__create_issue', 'supermemory'), null)
+  })
+
+  test('auto-approves the snake_case names the hosted server serves', () => {
+    for (const tool of ['list_spaces', 'list_memories', 'list_documents', 'get_document', 'who_am_i']) {
+      assert.equal(approve.readOnlyToolOf(`mcp__supermemory__${tool}`, 'supermemory'), tool)
+    }
+    assert.equal(approve.readOnlyToolOf('mcp__supermemory__add_memory', 'supermemory'), null)
+    assert.equal(approve.readOnlyToolOf('mcp__supermemory__set-active-tag', 'supermemory'), null)
+  })
+
+  test('only add_memory counts as an index write', () => {
+    assert.equal(approve.indexWriteToolOf('mcp__supermemory__add_memory', 'supermemory'), 'add_memory')
+    assert.equal(approve.indexWriteToolOf('mcp__claude_ai_supermemory__add_memory', 'supermemory'), 'add_memory')
+    assert.equal(approve.indexWriteToolOf('mcp__supermemory__save-memory', 'supermemory'), null)
+    assert.equal(approve.indexWriteToolOf('mcp__supermemory__search_memory', 'supermemory'), null)
+  })
+})
+
+describe('mcp scope', () => {
+  test('reads an explicit tag from object and JSON-string arguments', () => {
+    assert.equal(mcpScope.explicitContainerTag({ containerTag: 'a' }), 'a')
+    assert.equal(mcpScope.explicitContainerTag('{"containerTag":"b"}'), 'b')
+    assert.equal(mcpScope.explicitContainerTag({ containerTag: '  ' }), null)
+    assert.equal(mcpScope.explicitContainerTag({ containerTag: 7 }), null)
+    assert.equal(mcpScope.explicitContainerTag(undefined), null)
+    assert.equal(mcpScope.argumentRecord(null), null)
+    assert.equal(mcpScope.argumentRecord('not json'), undefined)
+    assert.equal(mcpScope.argumentRecord([1]), undefined)
+  })
+
+  test('refuses only tag-less space-scoped calls whose session container differs', () => {
+    const session = () => 'repo_session'
+    assert.match(
+      approve.scopeDenial('search_memory', { query: 'q' }, 'repo_host', session) as string,
+      /lands in "repo_host".*Retry with containerTag: "repo_session"/,
+    )
+    assert.equal(approve.scopeDenial('search_memory', { query: 'q' }, 'repo_session', session), null)
+    assert.equal(approve.scopeDenial('search_memory', { containerTag: 'x' }, 'repo_host', session), null)
+    assert.equal(approve.scopeDenial('who_am_i', undefined, 'repo_host', session), null)
+    assert.equal(approve.scopeDenial('set-active-tag', {}, 'repo_host', session), null)
+    assert.equal(approve.scopeDenial('search_memory', {}, null, session), null)
+    let asked = false
+    approve.scopeDenial('search_memory', { containerTag: 'x' }, 'repo_host', () => { asked = true; return '' })
+    assert.equal(asked, false, 'the session tag is resolved only when it can matter')
+  })
+
+  test('describes where tag-less calls land for the status report', () => {
+    assert.match(status.mcpScopeLine(null, 't'), /no bundled proxy/)
+    assert.match(status.mcpScopeLine('t', 't'), /default to this project/)
+    assert.match(status.mcpScopeLine('repo_home', 't'), /land in repo_home \(host cwd\), so they are refused here/)
   })
 })
 
@@ -517,5 +590,17 @@ describe('context gatherer skill', () => {
     assert.match(data.description as string, /Supermemory/)
     assert.match(body, /^You are the Supermemory context gatherer\./)
     assert.ok(!body.startsWith('---'), 'frontmatter must be stripped from the body')
+    assert.match(body, /mcp__supermemory__list_spaces/, 'names the tools the hosted server serves')
+  })
+
+  test('parses the shipped index skill and resolves its directory', () => {
+    const dir = contextGatherer.resolveSkillDir('supermemory-index')
+    const { data, body } = contextGatherer.splitFrontmatter(fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf-8'))
+    assert.equal(data.name, 'supermemory-index')
+    assert.equal(data.description, 'Index codebase into Supermemory for persistent context')
+    assert.equal(data['allowed-tools'], undefined, 'DSH skills carry no allowed-tools')
+    assert.match(body, /^# Codebase Indexing/)
+    assert.match(body, /Codebase indexed — \[N\] memories saved about \[project name\]/)
+    assert.doesNotMatch(body, /Omit `containerTag`/)
   })
 })

@@ -4,16 +4,17 @@ import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 // Declaration-merges `ctx.skills` onto Context.
 import type {} from '@deepseek-ai/dsh-skill'
+import type { SkillInvocationPolicy } from '@deepseek-ai/dsh-skill'
 import type { SupermemoryRuntime } from './runtime.ts'
 
 const SKILL_NAME = 'supermemory-context-gatherer'
 
 /**
- * The skill ships at the package root; the built bundle sits one level down
- * and the sources one as well, so both candidates are probed.
+ * Skills ship at the package root; the built bundle sits one level down and
+ * the sources one as well, so both candidates are probed.
  */
-export function resolveSkillDir(): string {
-  const candidates = [`../skills/${SKILL_NAME}/`, `../../skills/${SKILL_NAME}/`].map(
+export function resolveSkillDir(name: string = SKILL_NAME): string {
+  const candidates = [`../skills/${name}/`, `../../skills/${name}/`].map(
     relative => fileURLToPath(new URL(relative, import.meta.url)),
   )
   return candidates.find(dir => fs.existsSync(path.join(dir, 'SKILL.md'))) ?? candidates[0]!
@@ -32,38 +33,49 @@ export function splitFrontmatter(source: string): { data: Record<string, string>
   return { data, body: source.slice(match[0].length).trim() }
 }
 
-/**
- * The Claude Code plugin ships this as a subagent definition under `agents/`.
- * DSH has no markdown agent loader, so the same instructions ship as a skill:
- * one file, discovered by name, invocable by the model or by the user.
- */
-export function registerContextGatherer(ctx: Context, rt: SupermemoryRuntime): void {
-  const skillDir = resolveSkillDir()
+/** Register one skill shipped under `skills/<name>/SKILL.md`; warns and skips when unreadable. */
+export function registerBundledSkill(
+  ctx: Context,
+  rt: SupermemoryRuntime,
+  name: string,
+  invocation?: SkillInvocationPolicy,
+): void {
+  const skillDir = resolveSkillDir(name)
   const skillFile = path.join(skillDir, 'SKILL.md')
 
   let source: string
   try {
     source = fs.readFileSync(skillFile, 'utf-8')
   } catch (err) {
-    rt.warn(`context-gatherer skill not registered — ${skillFile} is unreadable: ${(err as Error).message}`)
+    rt.warn(`${name} skill not registered — ${skillFile} is unreadable: ${(err as Error).message}`)
     return
   }
 
   const { data, body } = splitFrontmatter(source)
   const description = data.description
   if (!description || !body) {
-    rt.warn(`context-gatherer skill not registered — ${skillFile} is missing a description or body`)
+    rt.warn(`${name} skill not registered — ${skillFile} is missing a description or body`)
     return
   }
 
   ctx.inject(['skills'], (skillCtx) => {
     skillCtx.skills.register({
-      name: SKILL_NAME,
+      name,
       description,
       content: body,
       source: 'runtime',
       path: skillFile,
       resourceBase: { kind: 'directory', path: skillDir },
+      ...(invocation ? { invocation } : {}),
     })
   })
+}
+
+/**
+ * The Claude Code plugin ships this as a subagent definition under `agents/`.
+ * DSH has no markdown agent loader, so the same instructions ship as a skill:
+ * one file, discovered by name, invocable by the model or by the user.
+ */
+export function registerContextGatherer(ctx: Context, rt: SupermemoryRuntime): void {
+  registerBundledSkill(ctx, rt, SKILL_NAME)
 }

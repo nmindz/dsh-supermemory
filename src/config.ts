@@ -24,6 +24,8 @@ export interface PluginConfig {
   command?: boolean
   /** Register the bundled `supermemory-context-gatherer` skill. */
   contextGatherer?: boolean
+  /** Register the user-only `supermemory-index` skill, invoked as `/supermemory-index`. */
+  index?: boolean
   /**
    * Recall into and capture from delegated subagent sessions too. Off by
    * default, because Claude Code's hooks only ever see the main session.
@@ -41,5 +43,6 @@ export const PluginConfig: z<PluginConfig> = z.object({
   mcpServerName: z.string().default('supermemory'),
   command: z.boolean().default(true),
   contextGatherer: z.boolean().default(true),
+  index: z.boolean().default(true),
   includeSubagents: z.boolean().default(false),
 })

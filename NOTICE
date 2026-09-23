@@ -2,14 +2,14 @@ dsh-supermemory
 ===============
 
 This package is a native DeepSeek Harness port of the Claude Code `supermemory`
-plugin, version 0.1.6.
+plugin, version 0.1.8.
 
 Upstream project
 ----------------
 
   Name:      supermemory (Claude Code plugin)
   Source:    https://github.com/supermemoryai/claude-supermemory
-  Version:   0.1.6
+  Version:   0.1.8
   Copyright: (c) Supermemory <support@supermemory.ai>
   License:   MIT
 
@@ -39,6 +39,8 @@ upstream behavior, wire format, prompt text, and file layout:
   src/status.ts                <- plugin/commands/status.md
   skills/supermemory-context-gatherer/SKILL.md
                                <- plugin/agents/context-gatherer.md
+  skills/supermemory-index/SKILL.md
+                               <- plugin/commands/index.md
   templates/auth-success.html  <- plugin/hooks/templates/auth-success.html (verbatim)
   templates/auth-error.html    <- plugin/hooks/templates/auth-error.html (verbatim)
 

@@ -3,7 +3,7 @@
  * hosted Supermemory MCP server.
  */
 import assert from 'node:assert/strict'
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -12,6 +12,10 @@ import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 const PROXY = path.join(import.meta.dirname, '..', 'src', 'mcp-proxy.ts')
+
+// A forced tag in the developer's shell would mask the derived one.
+delete process.env.SUPERMEMORY_REPO_TAG
+delete process.env.SUPERMEMORY_ISOLATE_WORKTREES
 
 let server: http.Server
 let origin: string
@@ -45,7 +49,7 @@ interface ProxyRun {
   lines: Promise<string[]>
 }
 
-function startProxy(home: string): ProxyRun {
+function startProxy(home: string, cwd?: string): ProxyRun {
   const child = spawn(
     process.execPath,
     ['--experimental-strip-types', '--no-warnings', PROXY],
@@ -57,6 +61,7 @@ function startProxy(home: string): ProxyRun {
         SUPERMEMORY_MCP_URL: origin,
         SUPERMEMORY_CC_API_KEY: '',
       },
+      cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
     },
   ) as ChildProcessWithoutNullStreams
@@ -69,6 +74,35 @@ function startProxy(home: string): ProxyRun {
   })
 
   return { child, lines }
+}
+
+function makeRepo(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-supermemory-proxy-repo-'))
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: dir, stdio: ['pipe', 'pipe', 'pipe'] })
+  }
+  git('init', '-q')
+  git('remote', 'add', 'origin', 'git@github.com:acme/widgets.git')
+  return fs.realpathSync.native(dir)
+}
+
+/** Write each JSON-RPC line, give the proxy time to forward, then close stdin. */
+async function drive(run: ProxyRun, messages: unknown[]): Promise<string[]> {
+  for (const message of messages) run.child.stdin.write(`${JSON.stringify(message)}\n`)
+  await new Promise(resolve => setTimeout(resolve, 600))
+  run.child.stdin.end()
+  return run.lines
+}
+
+/** Answer the request just recorded in `seen` with an empty success. */
+function echoResult(_req: http.IncomingMessage, res: http.ServerResponse): void {
+  res.setHeader('content-type', 'application/json')
+  const { id } = JSON.parse(seen.at(-1)!.body) as { id?: number }
+  res.end(JSON.stringify({ jsonrpc: '2.0', id, result: { ok: true } }))
+}
+
+function forwardedCalls(): { method: string; params?: { name?: string; arguments?: unknown } }[] {
+  return seen.map(record => JSON.parse(record.body))
 }
 
 function homeWithKey(apiKey: string | null): string {
@@ -198,5 +232,54 @@ describe('mcp proxy', () => {
     const message = JSON.parse(out[0]!)
     assert.equal(message.error.code, -32000)
     assert.match(message.error.message, /Supermemory MCP 401: revoked/)
+  })
+
+  test('injects the repo container tag when space-scoped tools omit it', async () => {
+    seen = []
+    respond = echoResult
+    const repo = makeRepo()
+    const home = homeWithKey('sm_test_key')
+    const { getContainerTag } = await import('../src/lib/container-tag.ts')
+    const expected = getContainerTag(repo)
+
+    await drive(startProxy(home, repo), [
+      { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search_memory', arguments: { query: 'auth' } } },
+      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'add_memory', arguments: { content: 'remember this' } } },
+      { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'listDocuments' } },
+      { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'list_memories', arguments: '{"limit":5}' } },
+    ])
+
+    const forwarded = forwardedCalls()
+    assert.match(expected, /^repo_widgets__[0-9a-f]{16}$/)
+    assert.equal((forwarded[0]!.params!.arguments as Record<string, unknown>).containerTag, expected)
+    assert.equal((forwarded[0]!.params!.arguments as Record<string, unknown>).query, 'auth')
+    assert.equal((forwarded[1]!.params!.arguments as Record<string, unknown>).containerTag, expected)
+    assert.deepEqual(forwarded[2]!.params!.arguments, { containerTag: expected })
+    assert.deepEqual(
+      JSON.parse(forwarded[3]!.params!.arguments as string),
+      { limit: 5, containerTag: expected },
+      'string-encoded arguments stay string-encoded',
+    )
+  })
+
+  test('keeps an explicit containerTag and leaves unrelated tools alone', async () => {
+    seen = []
+    respond = echoResult
+    const repo = makeRepo()
+    const home = homeWithKey('sm_test_key')
+
+    await drive(startProxy(home, repo), [
+      { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search_memory', arguments: { query: 'auth', containerTag: 'other_space' } } },
+      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'set-active-tag', arguments: { containerTag: 'picked' } } },
+      { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'who_am_i' } },
+      { jsonrpc: '2.0', id: 4, method: 'tools/list' },
+    ])
+
+    const forwarded = forwardedCalls()
+    assert.equal((forwarded[0]!.params!.arguments as Record<string, unknown>).containerTag, 'other_space')
+    assert.equal((forwarded[1]!.params!.arguments as Record<string, unknown>).containerTag, 'picked')
+    assert.equal(forwarded[2]!.params!.arguments, undefined)
+    assert.equal(forwarded[3]!.method, 'tools/list')
+    assert.equal(forwarded[3]!.params, undefined)
   })
 })
