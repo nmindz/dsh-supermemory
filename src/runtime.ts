@@ -1,16 +1,23 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import { BRAND, gray } from './lib/colors.ts'
 
-/** The `{kind:'plugin'}` source stamped on every context this plugin injects. */
-export const PLUGIN_SOURCE = { kind: 'plugin', plugin: 'supermemory' } as const
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    supermemory: { kind: 'supermemory' } & ContextFormed
+  }
+}
+
+/** The producer-owned source stamped on every context this plugin injects. */
+export const PLUGIN_SOURCE = { kind: 'supermemory' } as const
 
 /**
  * Shared per-process state for the plugin's four behaviors.
  *
- * `bootstraps` holds the session-start memory fetch. `agent/session-start` is
- * an emit point that is never awaited, so the fetch is parked here and the
- * first `agent/pre-step` — a waterfall that IS awaited — folds the result into
+ * `bootstraps` holds the session-start memory fetch. `agent/created` awaits its
+ * listeners before the agent accepts input, so the fetch is parked here instead
+ * of delaying creation, and the first `agent/pre-step` folds the result into
  * that step's messages. Claude Code's detached SessionStart hook can miss the
  * first request; this cannot.
  */

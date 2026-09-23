@@ -129,7 +129,7 @@ describe('recall', () => {
     const messages = [
       { source: { kind: 'user' }, content: [{ type: 'text', text: 'ship the ' }] },
       { source: { kind: 'user' }, content: [{ type: 'text', text: 'migration' }] },
-      { source: { kind: 'plugin', plugin: 'supermemory' }, content: [{ type: 'text', text: 'IGNORED' }] },
+      { source: { kind: 'supermemory', form: 'recall' }, content: [{ type: 'text', text: 'IGNORED' }] },
     ]
     assert.equal(recall.promptFrom(messages as never), 'ship the migration')
   })

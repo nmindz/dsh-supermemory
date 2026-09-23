@@ -166,7 +166,7 @@ DSH has no command-hook runner, no markdown command loader, and no markdown agen
 
 | Claude Code | DSH |
 |---|---|
-| `SessionStart` hook | `agent/session-start` listener, delivered through the first `agent/pre-step` |
+| `SessionStart` hook | `agent/created` listener, delivered through the first `agent/pre-step` |
 | `UserPromptSubmit` hook | `agent/pre-step` waterfall, folded onto the `enter` decision |
 | `PreToolUse` hook (`mcp__.*supermemory.*`) | `tools/pre-execute` waterfall, registered `prepend: true`, returning `{ kind: 'allow' }` |
 | `Stop` hook (async) | `agent/turn-stopping` serial listener, awaited before the turn commits |
@@ -178,7 +178,7 @@ DSH dispatches those points to every agent, including delegated subagents, while
 
 Two further differences are worth stating plainly:
 
-**Session-start delivery is stronger here.** `agent/session-start` is an emit point that DSH never awaits, so an async memory fetch started there can miss the first request — the same gap the Claude Code hooks bridge documents. This plugin parks the fetch and the first `agent/pre-step`, which *is* awaited, folds it in. The first request always carries the project's memory.
+**Session-start delivery is stronger here.** Claude Code's detached SessionStart hook can miss the first request. This plugin starts the memory fetch in `agent/created` without holding up agent creation, parks it, and the first `agent/pre-step`, which is awaited, folds it in. The first request always carries the project's memory.
 
 **There is no status line to install.** Claude Code's plugin writes a `statusLine` entry into `~/.claude/settings.json`; DSH's status line is host-owned and takes no plugin command. The per-session state files are written exactly as before and the animated renderer ships as an entry point, so any status bar that can run a command renders the identical line:
 

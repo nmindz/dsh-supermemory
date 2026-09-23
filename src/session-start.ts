@@ -191,7 +191,7 @@ export function registerSessionStart(
   rt: SupermemoryRuntime,
   config: PluginConfig,
 ): void {
-  ctx.on('agent/session-start', ({ agent }) => {
+  ctx.on('agent/created', ({ agent }) => {
     const sessionId = sessionIdOf(agent)
     if (!sessionId || rt.bootstraps.has(sessionId)) return
     if (isSubagent(agent) && !config.includeSubagents) return
