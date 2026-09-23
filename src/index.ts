@@ -54,6 +54,9 @@ export function apply(ctx: Context, config: PluginConfig): void {
   if (config.contextGatherer !== false) registerContextGatherer(ctx, rt)
 
   if (config.mcp !== false) {
+    // DSH scrubs credential-shaped names from the child env, which would
+    // leave an env-only key unauthenticated on the MCP path.
+    const apiKey = process.env.SUPERMEMORY_CC_API_KEY
     // Mounted as a child plugin rather than a separate patch row: the proxy
     // path is resolved from this module, so no user has to write an absolute
     // path into their profile patch.
@@ -62,7 +65,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
       serverName: config.mcpServerName ?? 'supermemory',
       command: process.execPath,
       args: [MCP_PROXY],
-      env: {},
+      env: apiKey ? { SUPERMEMORY_CC_API_KEY: apiKey } : {},
       cwd: '',
       toolCallTimeoutMs: 60_000,
       failOnStartupError: false,

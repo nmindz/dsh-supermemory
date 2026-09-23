@@ -129,7 +129,7 @@ Override the row in `~/.dsh/profiles/<name>/cordis.patch.yml` (or `~/.dsh/cordis
 
 | Where | What |
 |---|---|
-| `SUPERMEMORY_CC_API_KEY` | API key; wins over every stored credential |
+| `SUPERMEMORY_CC_API_KEY` | API key; wins over every stored credential. Forwarded to the MCP proxy explicitly, because DSH scrubs credential-shaped names from a child's environment |
 | `SUPERMEMORY_API_URL` | API base URL (default `https://api.supermemory.ai`) |
 | `SUPERMEMORY_MCP_URL` | MCP endpoint (default `https://mcp.supermemory.ai/mcp`) |
 | `SUPERMEMORY_AUTH_URL` | Login page used by the browser flow |
